@@ -1,13 +1,17 @@
-
 import React, { useRef, useCallback } from 'react';
 import { CloudUpIcon } from './icons/CloudUpIcon'; // Updated Icon
 
 interface FileUploadProps {
   onFileSelect: (file: File) => void;
   disabled?: boolean;
+  showDropzone?: boolean;
 }
 
-export const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }) => {
+export const FileUpload: React.FC<FileUploadProps> = ({ 
+  onFileSelect, 
+  disabled,
+  showDropzone = true 
+}) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileChange = useCallback((event: React.ChangeEvent<HTMLInputElement>) => {
@@ -19,6 +23,20 @@ export const FileUpload: React.FC<FileUploadProps> = ({ onFileSelect, disabled }
   const handleClick = () => {
     fileInputRef.current?.click();
   };
+
+  if (!showDropzone) {
+    return (
+      <input
+        type="file"
+        ref={fileInputRef}
+        onChange={handleFileChange}
+        accept="audio/*,video/*"
+        className="hidden"
+        disabled={disabled}
+        aria-hidden="true"
+      />
+    );
+  }
 
   return (
     <div

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef, useMemo, createContext, useContext } from 'react';
 import { FileUpload } from './components/FileUpload';
 import { ResultCard } from './components/ResultCard';
 import { Alert } from './components/Alert';
@@ -15,6 +15,7 @@ import { FileDescriptionFilledIcon } from './components/icons/FileDescriptionFil
 import { Message2FilledIcon } from './components/icons/Message2FilledIcon'; 
 import { EyeTableIcon } from './components/icons/EyeTableIcon';
 import { AudioWaveform } from './components/AudioWaveform';
+import WaveSurfer from 'wavesurfer.js';
 
 // Тип для хранения сопоставления идентификаторов дикторов с именами
 type SpeakerAssignments = { [key: string]: string };
@@ -45,27 +46,122 @@ const applyNamesToTranscript = (baseTranscript: string | null, assignments: Spea
   return updatedTranscript;
 };
 
+// Создаем контекст для аудио плеера
+interface AudioPlayerContextType {
+  pause: () => void;
+  play: () => void;
+  isPlaying: boolean;
+  setWaveSurfer: (ws: WaveSurfer | null) => void;
+}
 
-const App: React.FC = () => {
+const AudioPlayerContext = createContext<AudioPlayerContextType | null>(null);
+
+const useAudioPlayer = () => {
+  const context = useContext(AudioPlayerContext);
+  if (!context) {
+    throw new Error('useAudioPlayer must be used within AudioPlayerProvider');
+  }
+  return context;
+};
+
+// Выносим AudioPlayer в отдельный компонент
+const AudioPlayerProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isPlaying, setIsPlaying] = useState(false);
+  const wavesurferRef = useRef<WaveSurfer | null>(null);
+
+  const setWaveSurfer = useCallback((ws: WaveSurfer | null) => {
+    wavesurferRef.current = ws;
+  }, []);
+
+  const pause = useCallback(() => {
+    if (wavesurferRef.current) {
+      wavesurferRef.current.pause();
+      setIsPlaying(false);
+    }
+  }, []);
+
+  const play = useCallback(() => {
+    if (wavesurferRef.current) {
+      wavesurferRef.current.play();
+      setIsPlaying(true);
+    }
+  }, []);
+
+  const value = useMemo(() => ({
+    pause,
+    play,
+    isPlaying,
+    setWaveSurfer
+  }), [pause, play, isPlaying, setWaveSurfer]);
+
+  return (
+    <AudioPlayerContext.Provider value={value}>
+      {children}
+    </AudioPlayerContext.Provider>
+  );
+};
+
+// Отдельный компонент для отображения аудио волны
+const AudioWaveformPlayer: React.FC<{
+  file: File | null;
+}> = React.memo(({ file }) => {
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const { setWaveSurfer } = useAudioPlayer();
+
+  // Очистка URL при размонтировании
+  useEffect(() => {
+    return () => {
+      if (audioUrl) {
+        URL.revokeObjectURL(audioUrl);
+      }
+    };
+  }, [audioUrl]);
+
+  // Создание URL для аудио при изменении файла
+  useEffect(() => {
+    if (file) {
+      const objectUrl = URL.createObjectURL(file);
+      setAudioUrl(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+    }
+  }, [file]);
+
+  const handleWaveSurferInit = useCallback((ws: WaveSurfer) => {
+    setWaveSurfer(ws);
+  }, [setWaveSurfer]);
+
+  if (!file || !audioUrl) return null;
+
+  return (
+    <div className="mt-4">
+      <AudioWaveform 
+        audioUrl={audioUrl}
+        className="w-full"
+        isVideo={file.type.startsWith('video/')}
+        onWaveSurferInit={handleWaveSurferInit}
+      />
+    </div>
+  );
+});
+
+AudioWaveformPlayer.displayName = 'AudioWaveformPlayer';
+
+// Компонент для основного контента приложения
+const AppContent: React.FC = () => {
   const [file, setFile] = useState<File | null>(null);
-  const [fileDataUrl, setFileDataUrl] = useState<string | null>(null);
   const [fileName, setFileName] = useState<string | null>(null);
-  
-  const [transcriptFromServer, setTranscriptFromServer] = useState<string | null>(null); 
-  const [editableTranscript, setEditableTranscript] = useState<string | null>(null); 
+  const [fileDataUrl, setFileDataUrl] = useState<string | null>(null);
+  const [transcriptFromServer, setTranscriptFromServer] = useState<string | null>(null);
+  const [editableTranscript, setEditableTranscript] = useState<string | null>(null);
   const [summary, setSummary] = useState<string | null>(null);
-  
   const [isTranscribing, setIsTranscribing] = useState<boolean>(false);
   const [isSummarizing, setIsSummarizing] = useState<boolean>(false);
   const [isInferringNames, setIsInferringNames] = useState<boolean>(false);
   const [autoNameSuggestionStatus, setAutoNameSuggestionStatus] = useState<AutoNameSuggestionStatus>('idle');
   const [error, setError] = useState<string | null>(null);
   const [videoProcessingWarning, setVideoProcessingWarning] = useState<string | null>(null);
-
-
   const [uniqueSpeakerIds, setUniqueSpeakerIds] = useState<string[]>([]);
   const [speakerAssignments, setSpeakerAssignments] = useState<SpeakerAssignments>({});
-
   const [openSections, setOpenSections] = useState<Record<SectionKeys, boolean>>({
     upload: true,
     transcription: false,
@@ -75,15 +171,7 @@ const App: React.FC = () => {
   });
   const [fullscreenSectionKey, setFullscreenSectionKey] = useState<SectionKeys | null>(null);
 
-  const [copyButtons, setCopyButtons] = useState<Record<SectionKeys, React.ReactNode>>({
-    upload: null,
-    transcription: null,
-    speakers: null,
-    chat: null,
-    summary: null,
-  });
-
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const { pause } = useAudioPlayer();
 
   const toggleSection = (sectionKey: SectionKeys) => {
     setOpenSections((prev: Record<SectionKeys, boolean>) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
@@ -109,18 +197,11 @@ const App: React.FC = () => {
   }, [fullscreenSectionKey]);
 
 
-  const resetAppState = () => {
-    // Очищаем существующие URL перед сбросом
-    if (fileDataUrl) {
-      URL.revokeObjectURL(fileDataUrl);
-    }
-    if (audioUrl) {
-      URL.revokeObjectURL(audioUrl);
-    }
-
+  const resetAppState = useCallback(() => {
+    pause();
     setFile(null);
-    setFileDataUrl(null);
     setFileName(null);
+    setFileDataUrl(null);
     setTranscriptFromServer(null);
     setEditableTranscript(null);
     setSummary(null);
@@ -133,19 +214,18 @@ const App: React.FC = () => {
     setUniqueSpeakerIds([]);
     setSpeakerAssignments({});
     setOpenSections({
-        upload: true,
-        transcription: false,
-        speakers: false,
-        chat: false,
-        summary: false,
+      upload: true,
+      transcription: false,
+      speakers: false,
+      chat: false,
+      summary: false,
     });
     setFullscreenSectionKey(null);
-    setAudioUrl(null);
-  };
+  }, [pause]);
   
   const extractSpeakerIds = useCallback((text: string): string[] => {
     if (!text) return [];
-    const speakerRegex = /(?:\[\d{2}:\d{2}:\d{2}(?:\.\d+)?\]\s*)?(Диктор\s*[A-ZА-Я0-9]+):/gi;
+    const speakerRegex = /(?:\\[\\d{2}:\\d{2}:\\d{2}(?:\\.\\d+)?\\]\\s*)?(Диктор\\s*[A-ZА-Я0-9]+):/gi;
     const matches = text.matchAll(speakerRegex);
     const ids = new Set<string>();
     for (const match of matches) {
@@ -213,42 +293,41 @@ const App: React.FC = () => {
     };
 
     processTranscription();
-  }, [transcriptFromServer, extractSpeakerIds]); 
+  }, [transcriptFromServer, extractSpeakerIds, openSection]); 
 
   const handleFileSelect = useCallback((selectedFile: File) => {
     resetAppState(); 
-
     setFile(selectedFile);
     setFileName(selectedFile.name);
 
     const isVideo = selectedFile.type.startsWith('video/');
     if (isVideo) {
-        setVideoProcessingWarning("Обработка видеофайлов может занять больше времени, особенно для больших файлов. Мы оптимизируем его для транскрипции аудио.");
+      setVideoProcessingWarning("Обработка видеофайлов может занять больше времени, особенно для больших файлов. Мы оптимизируем его для транскрипции аудио.");
     } else {
-        setVideoProcessingWarning(null);
+      setVideoProcessingWarning(null);
     }
 
-    // Создаем URL для файла
     const objectUrl = URL.createObjectURL(selectedFile);
     setFileDataUrl(objectUrl);
-    
-    // Создаем URL для аудио/видео
-    if (selectedFile.type.startsWith('audio/') || isVideo) {
-      setAudioUrl(objectUrl);
-    } else {
-      setAudioUrl(null);
-    }
 
     openSection('upload', true);
 
-    // Очищаем URL при размонтировании компонента
     return () => {
       URL.revokeObjectURL(objectUrl);
     };
-  }, [openSection]);
+  }, [openSection, resetAppState]);
 
-  const handleTranscription = async () => {
-    if (!fileDataUrl || !file) {
+  const fileToBase64 = async (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = error => reject(error);
+    });
+  };
+
+  const handleTranscription = useCallback(async () => {
+    if (!file) {
       setError("Файл не выбран или данные файла отсутствуют.");
       return;
     }
@@ -265,9 +344,9 @@ const App: React.FC = () => {
     openSection('chat', false);
     openSection('summary', false);
 
-
     try {
-      const result = await transcribeAudioOrVideo(fileDataUrl);
+      const base64Data = await fileToBase64(file);
+      const result = await transcribeAudioOrVideo(base64Data);
       setTranscriptFromServer(result); 
     } catch (e) {
       const errorMessage = e instanceof Error ? e.message : "Во время транскрипции произошла неизвестная ошибка.";
@@ -277,7 +356,7 @@ const App: React.FC = () => {
     } finally {
       setIsTranscribing(false);
     }
-  };
+  }, [file, openSection]);
 
   const handleSpeakerNameChange = (id: string, newName: string) => {
     const updatedAssignments = { ...speakerAssignments, [id]: newName.trim() || id };
@@ -319,7 +398,7 @@ const App: React.FC = () => {
     resetAppState();
   };
 
-  const getAutoNameSuggestionMessage = () => {
+  const suggestionMessage = useMemo(() => {
     if (isInferringNames || autoNameSuggestionStatus === 'pending') {
       return { text: "Анализ имен дикторов...", type: "info" as AlertProps['type'] };
     }
@@ -337,14 +416,8 @@ const App: React.FC = () => {
       default:
         return null;
     }
-  };
+  }, [isInferringNames, autoNameSuggestionStatus, uniqueSpeakerIds.length]);
   
-  const suggestionMessage = getAutoNameSuggestionMessage();
-  
-  const handleCopyButtonRender = useCallback((sectionKey: SectionKeys) => (button: React.ReactNode) => {
-    setCopyButtons(prev => ({ ...prev, [sectionKey]: button }));
-  }, []);
-
   const renderSection = (key: SectionKeys, stepNumber: string | undefined, title: string, icon: React.ReactNode, condition: boolean, content: React.ReactNode) => {
     if (!condition && fullscreenSectionKey !== key) return null;
     if (fullscreenSectionKey && fullscreenSectionKey !== key) return null;
@@ -360,7 +433,6 @@ const App: React.FC = () => {
             isFullScreen={fullscreenSectionKey === key}
             onToggleFullScreen={() => handleToggleFullScreen(key)}
             contentClassName={`p-4 md:p-6 ${fullscreenSectionKey === key ? 'flex-grow flex flex-col' : ''}`}
-            headerButtons={copyButtons[key]}
         >
             {content}
         </CollapsibleSection>
@@ -370,7 +442,6 @@ const App: React.FC = () => {
 
   return (
     <div className={`min-h-screen bg-gradient-to-br from-slate-900 to-slate-800 p-4 sm:p-6 lg:p-8 flex flex-col items-center ${fullscreenSectionKey ? 'overflow-hidden' : ''}`}>
-      
       <main className="w-full max-w-4xl space-y-6">
         {error && (!fullscreenSectionKey || (fullscreenSectionKey && openSections[fullscreenSectionKey])) &&  (
             <Alert message={error} type="error" onClose={() => setError(null)} />
@@ -378,7 +449,11 @@ const App: React.FC = () => {
         
         {renderSection('upload', '1', "Загрузка файла", <CloudUpIcon className="h-6 w-6 text-sky-400"/>, true, 
             <>
-                <FileUpload onFileSelect={handleFileSelect} disabled={isTranscribing || isSummarizing || isInferringNames} />
+                <FileUpload 
+                    onFileSelect={handleFileSelect} 
+                    disabled={isTranscribing || isSummarizing || isInferringNames}
+                    showDropzone={!fileDataUrl}
+                />
                 {fileName && (
                     <div className="mt-4 p-3 bg-slate-700/80 rounded-lg text-slate-300">
                     Выбрано: <span className="font-medium text-sky-400">{fileName}</span>
@@ -390,28 +465,22 @@ const App: React.FC = () => {
                         {videoProcessingWarning}
                     </div>
                 )}
-                {audioUrl && (
-                    <div className="mt-4">
-                        <AudioWaveform 
-                            audioUrl={audioUrl}
-                            className="w-full"
-                            isVideo={file?.type.startsWith('video/') ?? false}
-                        />
-                    </div>
-                )}
+                <AudioWaveformPlayer 
+                    file={file}
+                />
                 {fileDataUrl && (
                     <div className="mt-6 flex flex-col sm:flex-row sm:space-x-4 space-y-3 sm:space-y-0">
                     <button
                         onClick={handleTranscription}
-                        disabled={isTranscribing || !fileDataUrl || isSummarizing || isInferringNames}
+                        disabled={isTranscribing || isSummarizing || isInferringNames}
                         className="w-full sm:w-auto flex items-center justify-center px-6 py-3 bg-sky-500 hover:bg-sky-600 text-white font-semibold rounded-lg shadow-md transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
                         aria-live="polite"
                     >
                         <MicrophoneIcon className="h-5 w-5 mr-2" />
-                        {isTranscribing ? 'Транскрипция...' : (isInferringNames ? 'Анализ...' : 'Транскрибировать аудио')}
+                        {isTranscribing ? 'Транскрипция...' : (isInferringNames ? 'Анализ...' : 'Транскрибировать')}
                     </button>
                     <button
-                        onClick={clearAll}
+                        onClick={resetAppState}
                         disabled={isTranscribing || isSummarizing || isInferringNames}
                         className="w-full sm:w-auto px-6 py-3 bg-rose-500 hover:bg-rose-600 text-white font-semibold rounded-lg shadow-md transition-colors duration-150 disabled:opacity-50 disabled:cursor-not-allowed"
                     >
@@ -429,7 +498,6 @@ const App: React.FC = () => {
                 isLoading={isTranscribing && !transcriptFromServer} 
                 placeholder={isTranscribing ? "Загрузка транскрипции..." : "Транскрипция появится здесь..."}
                 isFullScreen={fullscreenSectionKey === 'transcription'}
-                onCopyButtonRender={handleCopyButtonRender('transcription')}
             />
         )}
         
@@ -473,7 +541,7 @@ const App: React.FC = () => {
         {renderSection('chat', "3", "Диалог по контексту", <Message2FilledIcon className="h-6 w-6 text-sky-400" />, editableTranscript !== null && !isTranscribing,
             <ChatSection 
                 transcriptContext={editableTranscript} 
-                geminiChatFunction={chatWithTranscriptContext} // Pass the service function directly
+                geminiChatFunction={chatWithTranscriptContext}
                 onChatError={(message) => setError(`Ошибка чата: ${message}`)}
                 isFullScreen={fullscreenSectionKey === 'chat'}
             />
@@ -500,12 +568,19 @@ const App: React.FC = () => {
                 isLoading={isSummarizing}
                 placeholder="Резюме появится здесь..."
                 isFullScreen={fullscreenSectionKey === 'summary'}
-                onCopyButtonRender={handleCopyButtonRender('summary')}
             />
         )}
       </main>
-     
     </div>
+  );
+};
+
+// Основной компонент приложения
+const App: React.FC = () => {
+  return (
+    <AudioPlayerProvider>
+      <AppContent />
+    </AudioPlayerProvider>
   );
 };
 

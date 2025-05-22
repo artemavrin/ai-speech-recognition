@@ -12,7 +12,6 @@ interface ResultCardProps {
   placeholder?: string;
   actionButton?: React.ReactNode;
   isFullScreen?: boolean;
-  onCopyButtonRender?: (button: React.ReactNode) => void;
 }
 
 export const ResultCard: React.FC<ResultCardProps> = ({ 
@@ -22,7 +21,6 @@ export const ResultCard: React.FC<ResultCardProps> = ({
   placeholder, 
   actionButton, 
   isFullScreen,
-  onCopyButtonRender 
 }) => {
   const [copied, setCopied] = useState(false);
   const contentRef = useRef<HTMLDivElement>(null);
@@ -56,12 +54,6 @@ export const ResultCard: React.FC<ResultCardProps> = ({
     </button>
   ) : null;
 
-  React.useEffect(() => {
-    if (onCopyButtonRender) {
-      onCopyButtonRender(copyButton);
-    }
-  }, [copyButton, onCopyButtonRender]);
-
   const cardId = `result-card-content-${title.replace(/\s+/g, '-').toLowerCase() || 'generic'}`;
   const isSummaryCard = title.includes("Резюме") || (title === "" && content && content.startsWith("#"));
 
@@ -73,9 +65,19 @@ export const ResultCard: React.FC<ResultCardProps> = ({
 
   return (
     <div className={rootClasses} aria-labelledby={title ? cardId : undefined}>
-      {title && !onCopyButtonRender && (
+      {title && (
         <div className="flex justify-between items-center mb-4">
           <h2 id={cardId} className="text-2xl font-semibold text-sky-300">{title}</h2>
+          {content && !isLoading && (
+            <button
+              onClick={handleCopy}
+              title={copied ? "Скопировано!" : "Копировать в буфер обмена"}
+              aria-label={copied ? "Содержимое скопировано" : "Копировать содержимое в буфер обмена"}
+              className="p-1.5 text-slate-400 hover:text-sky-400 focus:outline-none focus:ring-1 focus:ring-sky-500 rounded-md transition-colors"
+            >
+              {copied ? <CheckCircleIcon className="h-5 w-5 text-green-400" /> : <ClipboardIcon className="h-5 w-5" />}
+            </button>
+          )}
         </div>
       )}
       

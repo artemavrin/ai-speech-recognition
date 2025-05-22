@@ -6,6 +6,7 @@ interface AudioWaveformProps {
   onTimeUpdate?: (currentTime: number) => void;
   className?: string;
   isVideo?: boolean;
+  onWaveSurferInit?: (wavesurfer: WaveSurfer) => void;
 }
 
 export const AudioWaveform: React.FC<AudioWaveformProps> = ({
@@ -13,6 +14,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
   onTimeUpdate,
   className = '',
   isVideo = false,
+  onWaveSurferInit,
 }) => {
   const waveformRef = useRef<HTMLDivElement>(null);
   const wavesurferRef = useRef<WaveSurfer | null>(null);
@@ -58,6 +60,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     });
 
     wavesurferRef.current = wavesurfer;
+    onWaveSurferInit?.(wavesurfer);
 
     // Функция для обновления масштаба
     const updateZoom = () => {
@@ -119,7 +122,7 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
       container.removeEventListener('mousemove', handleMouseMove);
       container.removeEventListener('mouseleave', handleMouseLeave);
     };
-  }, [audioUrl, onTimeUpdate, isVideo]);
+  }, [audioUrl, onTimeUpdate, isVideo, onWaveSurferInit]);
 
   const handlePlayPause = () => {
     if (!wavesurferRef.current) return;
@@ -158,38 +161,39 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
     }
   };
 
+  const handleWaveformClick = (e: React.MouseEvent<HTMLDivElement>) => {
+    if (isLoading || !wavesurferRef.current) return;
+
+    const wavesurfer = wavesurferRef.current;
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const width = rect.width;
+    const progress = x / width;
+
+    // Если аудио не играет, начинаем воспроизведение с новой позиции
+    if (!isPlaying) {
+      wavesurfer.seekTo(progress);
+      wavesurfer.play();
+    } else {
+      // Если уже играет, просто меняем позицию
+      wavesurfer.seekTo(progress);
+    }
+  };
+
   return (
-    <div className={`bg-slate-800/50 rounded-lg p-4 ${className}`}>
-      <div className="relative">
-        <div 
-          ref={waveformRef} 
-          className={`w-full cursor-pointer ${isLoading ? 'opacity-50' : ''}`}
-          role="slider"
-          aria-label="Позиция воспроизведения"
-          aria-valuemin={0}
-          aria-valuemax={duration}
-          aria-valuenow={currentTime}
-          tabIndex={0}
-        />
-        {hoverTime !== null && hoverPosition !== null && !isLoading && (
-          <>
-            <div 
-              className="absolute top-0 bottom-0 w-0.5 pointer-events-none border-dashed border-sky-400/30"
-              style={{ 
-                left: `${hoverPosition}px`,
-                borderLeft: '1px dashed',
-                borderColor: 'rgb(56 189 248 / 0.3)' // sky-400/30
-              }}
-            />
-            <div 
-              className="absolute bottom-full mb-2 px-2 py-1 bg-slate-900 text-sky-400 text-sm rounded shadow-lg transform -translate-x-1/2 pointer-events-none whitespace-nowrap"
-              style={{ left: `${hoverPosition}px` }}
-            >
-              {formatTime(hoverTime)}
-            </div>
-          </>
-        )}
-      </div>
+    <div className={`relative ${className}`}>
+      <div 
+        ref={waveformRef}
+        onClick={handleWaveformClick}
+        className={`relative w-full h-20 bg-slate-800/50 rounded-lg overflow-hidden cursor-pointer isolate ${isLoading ? 'opacity-50' : ''}`}
+        role="slider"
+        aria-label="Позиция воспроизведения"
+        aria-valuemin={0}
+        aria-valuemax={duration}
+        aria-valuenow={currentTime}
+        tabIndex={0}
+      />
+      
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center space-x-2">
           <button
@@ -291,7 +295,24 @@ export const AudioWaveform: React.FC<AudioWaveformProps> = ({
           {formatTime(currentTime)} / {formatTime(duration)}
         </div>
       </div>
-      
+      {hoverTime !== null && hoverPosition !== null && !isLoading && (
+        <>
+          <div 
+            className="absolute top-0 bottom-10 w-0.5 pointer-events-none border-dashed border-sky-400/30"
+            style={{ 
+              left: `${hoverPosition}px`,
+              borderLeft: '1px dashed',
+              borderColor: 'rgb(56 189 248 / 0.3)' // sky-400/30
+            }}
+          />
+          <div 
+            className="absolute bottom-full mb-2 px-2 py-1 bg-slate-900 text-sky-400 text-sm rounded shadow-lg transform -translate-x-1/2 pointer-events-none whitespace-nowrap"
+            style={{ left: `${hoverPosition}px` }}
+          >
+            {formatTime(hoverTime)}
+          </div>
+        </>
+      )}
     </div>
   );
 }; 

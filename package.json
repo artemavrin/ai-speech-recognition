@@ -13,7 +13,8 @@
     "dompurify": "^3.0.11",
     "marked": "^12.0.2",
     "react": "^19.1.0",
-    "react-dom": "^19.1.0"
+    "react-dom": "^19.1.0",
+    "wavesurfer.js": "^7.9.5"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

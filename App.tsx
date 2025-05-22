@@ -14,6 +14,7 @@ import { CloudUpIcon } from './components/icons/CloudUpIcon'; // New Upload Icon
 import { FileDescriptionFilledIcon } from './components/icons/FileDescriptionFilledIcon'; // New Transcription Icon
 import { Message2FilledIcon } from './components/icons/Message2FilledIcon'; 
 import { EyeTableIcon } from './components/icons/EyeTableIcon';
+import { AudioWaveform } from './components/AudioWaveform';
 
 // Тип для хранения сопоставления идентификаторов дикторов с именами
 type SpeakerAssignments = { [key: string]: string };
@@ -82,6 +83,8 @@ const App: React.FC = () => {
     summary: null,
   });
 
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+
   const toggleSection = (sectionKey: SectionKeys) => {
     setOpenSections((prev: Record<SectionKeys, boolean>) => ({ ...prev, [sectionKey]: !prev[sectionKey] }));
   };
@@ -107,6 +110,14 @@ const App: React.FC = () => {
 
 
   const resetAppState = () => {
+    // Очищаем существующие URL перед сбросом
+    if (fileDataUrl) {
+      URL.revokeObjectURL(fileDataUrl);
+    }
+    if (audioUrl) {
+      URL.revokeObjectURL(audioUrl);
+    }
+
     setFile(null);
     setFileDataUrl(null);
     setFileName(null);
@@ -129,6 +140,7 @@ const App: React.FC = () => {
         summary: false,
     });
     setFullscreenSectionKey(null);
+    setAudioUrl(null);
   };
   
   const extractSpeakerIds = useCallback((text: string): string[] => {
@@ -209,26 +221,30 @@ const App: React.FC = () => {
     setFile(selectedFile);
     setFileName(selectedFile.name);
 
-    if (selectedFile.type.startsWith('video/')) {
+    const isVideo = selectedFile.type.startsWith('video/');
+    if (isVideo) {
         setVideoProcessingWarning("Обработка видеофайлов может занять больше времени, особенно для больших файлов. Мы оптимизируем его для транскрипции аудио.");
     } else {
         setVideoProcessingWarning(null);
     }
 
+    // Создаем URL для файла
+    const objectUrl = URL.createObjectURL(selectedFile);
+    setFileDataUrl(objectUrl);
+    
+    // Создаем URL для аудио/видео
+    if (selectedFile.type.startsWith('audio/') || isVideo) {
+      setAudioUrl(objectUrl);
+    } else {
+      setAudioUrl(null);
+    }
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
-      setFileDataUrl(reader.result as string);
+    openSection('upload', true);
+
+    // Очищаем URL при размонтировании компонента
+    return () => {
+      URL.revokeObjectURL(objectUrl);
     };
-    reader.onerror = () => {
-      setError("Не удалось прочитать файл. Пожалуйста, попробуйте еще раз.");
-      setFileDataUrl(null);
-      setFile(null);
-      setFileName(null);
-      setVideoProcessingWarning(null);
-    };
-    reader.readAsDataURL(selectedFile);
-    openSection('upload', true); 
   }, [openSection]);
 
   const handleTranscription = async () => {
@@ -372,6 +388,15 @@ const App: React.FC = () => {
                     <div className="mt-2 p-3 bg-amber-500/20 rounded-lg text-amber-300 text-sm flex items-center">
                         <InformationCircleIcon className="h-5 w-5 mr-2 flex-shrink-0" />
                         {videoProcessingWarning}
+                    </div>
+                )}
+                {audioUrl && (
+                    <div className="mt-4">
+                        <AudioWaveform 
+                            audioUrl={audioUrl}
+                            className="w-full"
+                            isVideo={file?.type.startsWith('video/') ?? false}
+                        />
                     </div>
                 )}
                 {fileDataUrl && (
